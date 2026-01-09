@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>القرآن الكريم | تشغيل وتحميل</title>
+
+<style>
+  :root{
+    --bg:#0f172a;
+    --card:#0f1a2b;
+    --muted:#94a3b8;
+    --accent:#38bdf8;
+    --surface:#0b1220;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:Arial, Tahoma, "Segoe UI", sans-serif;
+    background:var(--bg); color:#fff; -webkit-font-smoothing:antialiased;
+  }
+  header{
+    background:#020617; padding:18px 12px; text-align:center;
+    border-bottom:1px solid rgba(255,255,255,0.03);
+  }
+  header h1{margin:0;color:var(--accent);font-size:1.45rem}
+  header p{margin:6px 0 0;color:var(--muted);font-size:0.95rem}
+  .container{padding:12px;max-width:980px;margin:0 auto}
+  .controls{display:grid;grid-template-columns:1fr 220px;gap:10px;margin:10px 0}
+  @media(max-width:640px){ .controls{grid-template-columns:1fr;}}
+  select,input,button{
+    width:100%; padding:10px; margin:0; font-size:15px; border-radius:8px;
+    border:1px solid rgba(255,255,255,0.03); background:var(--surface); color:#fff;
+  }
+  .surah{background:var(--card); padding:12px; margin:10px 0; border-radius:10px;}
+  .surah strong{display:block;margin-bottom:8px;font-size:1.05rem}
+  audio{width:100%; margin-top:6px; outline:none}
+  a,button.link{display:inline-block;margin-top:8px;color:var(--accent); text-decoration:none; background:transparent; border:none; cursor:pointer}
+  .meta{color:var(--muted); font-size:0.9rem}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  footer{ text-align:center; padding:12px; font-size:13px; color:var(--muted) }
+  .status{padding:10px;border-radius:8px;background:rgba(255,255,255,0.02); color:var(--muted); margin:8px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>📖 القرآن الكريم</h1>
+  <p>تشغيل وتحميل القرآن كاملًا مجانًا</p>
+</header>
+
+<div class="container">
+  <div class="controls">
+    <input id="search" placeholder="🔍 ابحث عن سورة (اسم أو رقم)" aria-label="بحث عن سورة" />
+    <select id="readerSelect" aria-label="اختر القارئ"><option>جاري التحميل...</option></select>
+  </div>
+
+  <div class="row">
+    <div class="status" id="status">جارٍ تحميل بيانات السور والقُرَّاء...</div>
+    <button id="downloadPlaylist" class="link" style="margin-left:auto">⬇️ تنزيل قائمة تشغيل (M3U)</button>
+  </div>
+
+  <div id="surahList">جاري التحميل...</div>
+</div>
+
+<footer>
+  المصدر الصوتي: mp3quran.net – موقع مجاني · تم تطوير الواجهة محليًا
+</footer>
+
+<script>
+(async function(){
+  const readersAPI = "https://mp3quran.net/api/v3/reciters?language=ar";
+  const surahAPI = "https://mp3quran.net/api/v3/suwar";
+
+  const readerSelect = document.getElementById("readerSelect");
+  const surahList = document.getElementById("surahList");
+  const search = document.getElementById("search");
+  const status = document.getElementById("status");
+  const downloadPlaylist = document.getElementById("downloadPlaylist");
+
+  let surahs = [], currentSurahs = [], currentServer = "";
+
+  function setStatus(text){
+    status.textContent = text;
+  }
+
+  function pad(n){ return String(n).padStart(3,"0"); }
+
+  function normalizeText(t){
+    if(!t) return "";
+    return t.toString().toLowerCase().trim();
+  }
+
+  function joinServer(server, name){
+    if(!server) return name;
+    return server.endsWith("/") ? server + name : server + "/" + name;
+  }
+
+  async function fetchJSON(url){
+    const res = await fetch(url);
+    if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  }
+
+  try{
+    // load surahs
+    const sdata = await fetchJSON(surahAPI);
+    surahs = sdata.suwar || [];
+    setStatus("قائمة السور جاهزة. جلب القرّاء...");
+  }catch(err){
+    surahList.innerHTML = "<div class='status'>فشل تحميل السور. تحقق من اتصال الشبكة.</div>";
+    setStatus("خطأ عند تحميل السور: " + err.message);
+    console.error(err);
+    return;
+  }
+
+  try{
+    const rdata = await fetchJSON(readersAPI);
+    const reciters = rdata.reciters || [];
+    // clear and add
+    readerSelect.innerHTML = "";
+    reciters.forEach((r,i)=>{
+      const o = document.createElement("option");
+      o.value = r.id;
+      o.textContent = r.name;
+      readerSelect.appendChild(o);
+    });
+    // select first and load its data
+    if(reciters.length){
+      readerSelect.value = reciters[0].id;
+      await loadReader();
+      setStatus("جاهز. اختر سورة أو ابحث عن اسمها.");
+    } else {
+      setStatus("لم يتم العثور على قرّاء.");
+      surahList.innerHTML = "<div class='status'>لا توجد بيانات قراء متاحة.</div>";
+    }
+  }catch(err){
+    surahList.innerHTML = "<div class='status'>فشل تحميل القرّاء. تحقق من اتصال الشبكة.</div>";
+    setStatus("خطأ عند تحميل القراء: " + err.message);
+    console.error(err);
+    return;
+  }
+
+  readerSelect.addEventListener("change", loadReader);
+  search.addEventListener("input", filterSurahs);
+  downloadPlaylist.addEventListener("click", downloadM3U);
+
+  async function loadReader(){
+    try{
+      setStatus("جاري تحميل بيانات القارئ...");
+      surahList.innerHTML = "<div class='status'>جارٍ تجهيز السور لهذا القارئ...</div>";
+      const rid = readerSelect.value;
+      if(!rid) return;
+      const url = `https://mp3quran.net/api/v3/reciters?reciter=${encodeURIComponent(rid)}&language=ar`;
+      const data = await fetchJSON(url);
+      const rec = data.reciters && data.reciters[0];
+      if(!rec || !rec.moshaf || !rec.moshaf[0]){
+        surahList.innerHTML = "<div class='status'>لا توجد بيانات للمصحف لهذا القارئ.</div>";
+        currentSurahs = [];
+        return;
+      }
+      const m = rec.moshaf[0];
+      const server = m.server || "";
+      currentServer = server;
+      // m.surah_list contains available surah IDs
+      const available = new Set(m.surah_list || []);
+      currentSurahs = surahs.filter(s => available.has(s.id));
+      render(currentSurahs, server);
+      setStatus(`عرض ${currentSurahs.length} سورة — القارئ: ${rec.name}`);
+    }catch(err){
+      surahList.innerHTML = "<div class='status'>حدث خطأ أثناء تحميل بيانات القارئ.</div>";
+      setStatus("خطأ: " + err.message);
+      console.error(err);
+    }
+  }
+
+  function render(list, server){
+    if(!list || list.length===0){
+      surahList.innerHTML = "<div class='status'>لا توجد سور لعرضها.</div>";
+      return;
+    }
+    surahList.innerHTML = "";
+    list.forEach(s => {
+      const n = pad(s.id);
+      const filename = n + ".mp3";
+      const url = joinServer(server, filename);
+      const div = document.createElement("div");
+      div.className = "surah";
+      div.innerHTML = `
+        <strong>${s.name} <span class="meta">— رقم ${s.id} • آيات ${s.ayat_count || "-"}</span></strong>
+        <audio controls preload="none" src="${url}"></audio>
+        <div class="row">
+          <a href="${url}" download>⬇️ تحميل السورة</a>
+          <a class="link" href="${url}" target="_blank" rel="noopener">▶️ فتح في نافذة جديدة</a>
+        </div>
+      `;
+      surahList.appendChild(div);
+    });
+  }
+
+  function filterSurahs(){
+    const q = normalizeText(search.value);
+    if(!q){
+      render(currentSurahs, currentServer);
+      return;
+    }
+    // allow search by name or number
+    const filtered = currentSurahs.filter(s => {
+      return normalizeText(s.name).includes(q) || String(s.id).includes(q);
+    });
+    render(filtered, currentServer);
+    setStatus(`عرض ${filtered.length} نتيجة${filtered.length!==1 ? "ات" : ""}`);
+  }
+
+  function downloadM3U(){
+    const list = Array.from(surahList.querySelectorAll(".surah"));
+    if(list.length===0){
+      alert("لا توجد سور للتحميل حالياً.");
+      return;
+    }
+    // Build playlist from currently rendered surahs (order on page)
+    const lines = ["#EXTM3U"];
+    list.forEach(div=>{
+      const audio = div.querySelector("audio");
+      if(audio && audio.src){
+        lines.push(audio.src);
+      }
+    });
+    const blob = new Blob([lines.join("\n")], {type:"audio/x-mpegurl"});
+    const name = "quran_playlist.m3u";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+})();
+</script>
+</body>
+</html>
