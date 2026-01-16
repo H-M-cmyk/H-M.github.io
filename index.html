@@ -15,12 +15,12 @@
   h1{margin:0;color:var(--accent);font-size:1.25rem}
   .langSwitch{margin-left:auto;display:flex;gap:8px}
   .container{max-width:1100px;margin:14px auto;padding:12px}
-  .controls{display:grid;grid-template-columns:1fr 260px;gap:10px}
+  .controls{display:grid;grid-template-columns:1fr 320px;gap:10px}
   @media(max-width:760px){.controls{grid-template-columns:1fr}}
-  input,select,button{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--surface);color:#fff;font-size:15px}
+  input,select,button,textarea{padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--surface);color:#fff;font-size:15px}
   .surah{background:var(--card);padding:12px;margin:10px 0;border-radius:10px}
   .surah strong{display:block;font-size:1rem}
-  audio{width:100%;margin-top:8px}
+  audio{width:100%;margin-top:8px;min-height:40px}
   a.link{color:var(--accent);text-decoration:none}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   footer{padding:14px;text-align:center;color:var(--muted);font-size:13px}
@@ -30,6 +30,7 @@
   .surahListHeader{display:flex;align-items:center;gap:10px}
   .checkbox{width:18px;height:18px}
   .failed{opacity:0.6}
+  textarea{min-height:80px;resize:vertical}
 </style>
 </head>
 <body>
@@ -50,11 +51,17 @@
     <div class="readerBlock">
       <label for="readerSelect" class="visually-hidden">اختر القارئ</label>
       <select id="readerSelect" aria-label="اختر القارئ"><option>جاري التحميل...</option></select>
-      <div class="row" style="justify-content:space-between">
+
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button id="downloadSelectedPlaylist" class="link">⬇️ تنزيل M3U (المحدد)</button>
+        <button id="downloadVisiblePlaylist" class="link">⬇️ تنزيل M3U (المرئي)</button>
+        <button id="downloadAllPlaylist" class="link">⬇️ تنزيل M3U (الكل)</button>
+      </div>
+
+      <label style="margin-top:8px">خوادم بديلة (سطر لكل عنوان) — تُستخدم كـ fallback عند فشل التحميل</label>
+      <textarea id="fallbackServers" placeholder="https://server1.example.com/\nhttps://server2.example.com/" aria-label="خوادم بديلة"></textarea>
+      <div class="row" style="justify-content:space-between;margin-top:8px">
         <div class="status" id="status">جارٍ تحميل بيانات السور والقرّاء...</div>
-        <div style="text-align:right">
-          <button id="downloadPlaylist" class="link">⬇️ تنزيل M3U</button>
-        </div>
       </div>
     </div>
   </div>
@@ -81,9 +88,12 @@
   const surahListEl = document.getElementById('surahList');
   const searchEl = document.getElementById('search');
   const statusEl = document.getElementById('status');
-  const downloadPlaylistBtn = document.getElementById('downloadPlaylist');
+  const downloadSelectedPlaylistBtn = document.getElementById('downloadSelectedPlaylist');
+  const downloadVisiblePlaylistBtn = document.getElementById('downloadVisiblePlaylist');
+  const downloadAllPlaylistBtn = document.getElementById('downloadAllPlaylist');
   const selectAllEl = document.getElementById('selectAll');
   const countsEl = document.getElementById('counts');
+  const fallbackTextarea = document.getElementById('fallbackServers');
 
   const btnAr = document.getElementById('btn-ar');
   const btnEn = document.getElementById('btn-en');
@@ -94,6 +104,8 @@
   let surahs = [], currentSurahs = [], currentServer = '', readers = [];
   let lang = localStorage.getItem('quran_lang') || 'ar';
   let lastReader = localStorage.getItem('quran_reader') || '';
+
+  const DEFAULT_FALLBACKS = ['https://server.mp3quran.net/'];
 
   const T = {
     ar: {
@@ -135,12 +147,14 @@
   btnEn.addEventListener('click', ()=>{ lang='en'; applyLang(); render(currentSurahs,currentServer); });
 
   function setStatus(text){ statusEl.textContent = text; }
-
   function pad(n){ return String(n).padStart(3,'0'); }
-
   function normalizeText(t){ return (t||'').toString().toLowerCase().trim(); }
-
   function joinServer(server, name){ if(!server) return name; return server.endsWith('/') ? server + name : server + '/' + name; }
+  function getFallbackServers(){
+    const txt = fallbackTextarea.value || '';
+    const lines = txt.split('\n').map(s=>s.trim()).filter(Boolean);
+    return lines.length ? lines : DEFAULT_FALLBACKS;
+  }
 
   async function fetchJSON(url){ const res = await fetch(url); if(!res.ok) throw new Error(res.status+' '+res.statusText); return res.json(); }
 
@@ -158,8 +172,7 @@
       const o = document.createElement('option'); o.value = r.id; o.textContent = (r.name || r.id) + (r.language ? ' — '+r.language : '');
       readerSelect.appendChild(o);
     });
-    // select lastReader if present
-    if(lastReader && Array.from(readerSelect.options).some(o=>o.value===lastReader)){ 
+    if(lastReader && Array.from(readerSelect.options).some(o=>o.value===lastReader)){
       readerSelect.value = lastReader;
     } else if(readerSelect.options.length){ readerSelect.value = readerSelect.options[0].value; }
     await loadReader();
@@ -169,10 +182,25 @@
 
   readerSelect.addEventListener('change', async ()=>{ localStorage.setItem('quran_reader', readerSelect.value); lastReader = readerSelect.value; await loadReader(); });
   searchEl.addEventListener('input', filterSurahs);
-  downloadPlaylistBtn.addEventListener('click', downloadM3U);
-  selectAllEl.addEventListener('change', ()=>{
-    const checked = selectAllEl.checked; document.querySelectorAll('.surah input[type="checkbox"]').forEach(cb=>cb.checked = checked);
-  });
+  selectAllEl.addEventListener('change', ()=>{ const checked = selectAllEl.checked; document.querySelectorAll('.surah input[type="checkbox"]').forEach(cb=>{ if(!cb.disabled) cb.checked = checked; }); });
+  downloadSelectedPlaylistBtn.addEventListener('click', ()=>downloadM3U(getSelectedAudioSrcs()));
+  downloadVisiblePlaylistBtn.addEventListener('click', ()=>downloadM3U(getVisibleAudioSrcs()));
+  downloadAllPlaylistBtn.addEventListener('click', ()=>downloadM3U(getAllAudioSrcs()));
+
+  let observer;
+  function setupLazyLoading(){
+    if(observer) observer.disconnect();
+    observer = new IntersectionObserver(entries=>{
+      entries.forEach(entry=>{
+        if(entry.isIntersecting){
+          const aud = entry.target.querySelector('audio');
+          if(aud && !aud.src){ aud.src = aud.dataset.src; }
+          observer.unobserve(entry.target);
+        }
+      });
+    },{root:null,rootMargin:'200px',threshold:0.1});
+    document.querySelectorAll('.surah').forEach(el=>observer.observe(el));
+  }
 
   async function loadReader(){
     try{
@@ -211,27 +239,32 @@
         </div>
       `;
       surahListEl.appendChild(div);
-      const audio = div.querySelector('audio'); audio.src = url;
+      const audio = div.querySelector('audio');
       audio.addEventListener('error', ()=>handleAudioError(audio, s, server));
-      const playBtn = div.querySelector('.btn-play'); playBtn.addEventListener('click', ()=>{ audio.play().catch(()=>{}); });
+      const playBtn = div.querySelector('.btn-play'); playBtn.addEventListener('click', ()=>{ if(!audio.src) audio.src = audio.dataset.src; audio.play().catch(()=>{}); });
     });
     countsEl.textContent = `${list.length} / ${surahs.length}`;
+    // setup lazy loading after DOM updated
+    setupLazyLoading();
   }
 
   function handleAudioError(audio, surah, server){
-    // mark as failed and try a simple fallback: try without leading zero padding if any
     const orig = audio.dataset.src || audio.src;
-    let tried = audio.dataset.tried || '';
-    if(tried === 'alt1'){
-      audio.closest('.surah').classList.add('failed');
-      console.warn('Failed to load', orig);
+    const fallbacks = getFallbackServers();
+    let tried = audio.dataset.tried ? audio.dataset.tried.split(',') : [];
+    // find next fallback not tried
+    const next = fallbacks.find(f => !tried.includes(f));
+    if(next){
+      tried.push(next);
+      audio.dataset.tried = tried.join(',');
+      const fname = orig.split('/').pop();
+      const alt = joinServer(next, fname);
+      audio.src = alt; audio.load(); console.info('Trying fallback', alt);
       return;
     }
-    // try alternate filename without zero padding (e.g., 01.mp3 -> 1.mp3)
-    const altName = surah.id + '.mp3';
-    const altUrl = joinServer(server, altName);
-    if(altUrl !== orig){ audio.dataset.tried = 'alt1'; audio.src = altUrl; audio.load(); }
-    else { audio.closest('.surah').classList.add('failed'); }
+    // no fallbacks left => mark failed
+    audio.closest('.surah').classList.add('failed');
+    console.warn('Failed to load after fallbacks', orig);
   }
 
   function filterSurahs(){
@@ -241,12 +274,17 @@
     render(filtered, currentServer); setStatus(T[lang].results(filtered.length));
   }
 
-  function downloadM3U(){
-    const checked = Array.from(document.querySelectorAll('.surah input[type=checkbox]')).filter(cb=>cb.checked);
-    const audioEls = checked.map(cb => cb.closest('.surah').querySelector('audio')).filter(a=>a && a.src);
-    if(audioEls.length===0){ alert(lang==='ar' ? 'لا توجد سور مختارة للتنزيل.' : 'No surahs selected.'); return; }
-    const lines = ['#EXTM3U']; audioEls.forEach(a=>lines.push(a.src));
-    const blob = new Blob([lines.join('\n')], {type:'audio/x-mpegurl'}); const name = 'quran_playlist.m3u'; const url = URL.createObjectURL(blob);
+  function getSelectedAudioSrcs(){ return Array.from(document.querySelectorAll('.surah input[type=checkbox]:checked')).map(cb=> cb.closest('.surah').querySelector('audio').dataset.src ).filter(Boolean); }
+  function getVisibleAudioSrcs(){ return Array.from(document.querySelectorAll('.surah')).filter(el=> isElementInViewport(el)).map(el=> el.querySelector('audio').dataset.src ).filter(Boolean); }
+  function getAllAudioSrcs(){ return Array.from(document.querySelectorAll('.surah audio')).map(a=>a.dataset.src).filter(Boolean); }
+
+  function isElementInViewport(el){ const rect = el.getBoundingClientRect(); return rect.bottom > 0 && rect.top < (window.innerHeight || document.documentElement.clientHeight); }
+
+  function downloadM3U(urls){
+    if(!urls || urls.length===0){ alert(lang==='ar' ? 'لا توجد سور مختارة للتنزيل.' : 'No surahs selected.'); return; }
+    const lines = ['#EXTM3U']; urls.forEach(u=>lines.push(u));
+    const blob = new Blob([lines.join('\n')], {type:'audio/x-mpegurl'});
+    const name = 'quran_playlist.m3u'; const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   }
 
